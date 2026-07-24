@@ -1,19 +1,21 @@
 name: Security Review
 
-# Runs the security-scoped review agent automatically on pull requests.
+# DEMO-REPO VARIANT of the review agent's workflow.
 #
-# Uses `pull_request` (NOT `pull_request_target`) on purpose: the token stays
-# read-only for fork PRs and secrets are not exposed to untrusted fork code.
-# The trade-off is that PRs from forks are not reviewed automatically — run
-# those manually via the "Run workflow" button (workflow_dispatch) after you
-# have inspected the diff. This is the correct posture for a security tool.
+# This repository is a *target* to be reviewed — it does not contain the agent
+# code. So unlike the agent's own self-review workflow, this one first checks
+# out the public code-review-agent repo and runs it against this repo's PRs.
+#
+# Uses `pull_request` (not `pull_request_target`): secrets are never exposed to
+# fork code. Fork PRs are therefore not auto-reviewed — run them via the manual
+# "Run workflow" button after inspecting the diff.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       pr_url:
-        description: "PR URL to review (e.g. https://github.com/owner/repo/pull/123)"
+        description: "PR URL to review"
         required: true
         type: string
       dry_run:
@@ -23,12 +25,10 @@ on:
         type: choice
         options: ["false", "true"]
 
-# Least privilege: read the repo, write PR comments. Nothing else.
 permissions:
   contents: read
   pull-requests: write
 
-# One in-flight review per PR; a newer push cancels the older run.
 concurrency:
   group: security-review-${{ github.event.pull_request.number || github.event.inputs.pr_url }}
   cancel-in-progress: true
@@ -37,28 +37,29 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out the review agent
         uses: actions/checkout@v4
+        with:
+          repository: akashkuushwahaa/code-review-agent
+          path: _agent
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: _agent/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r _agent/requirements.txt
 
       - name: Run security review
-        # Inputs are passed via env, never interpolated directly into the run
-        # script — `github.event.*` values are untrusted and inlining them is a
-        # shell-injection vector.
+        # github.event.* values pass through env, never inlined into the run
+        # script, to avoid shell injection.
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url || github.event.inputs.pr_url }}
           REVIEW_SEVERITY_THRESHOLD: ${{ vars.REVIEW_SEVERITY_THRESHOLD || 'medium' }}
-          # Set repository variable REVIEW_DRY_RUN=true to validate wiring
-          # without posting; the manual "Run workflow" input overrides it.
           REVIEW_DRY_RUN: ${{ github.event.inputs.dry_run || vars.REVIEW_DRY_RUN || 'false' }}
-        run: python review.py
+        run: python _agent/review.py
