@@ -1,0 +1,4 @@
+# Review agent settings for this repository
+bot_name: code-reviewer-agent-ai     # reply "@code-reviewer-agent-ai explain | ignore | re-review"
+thresholds:
+  performance: medium                # show performance findings inline too, for the demo
